@@ -1,0 +1,11 @@
+route_id,route_name,start_location,end_location
+R001,Route 1,Station J,Station L
+R002,Route 2,Station Z,Station F
+R003,Route 3,Station Y,Station L
+R004,Route 4,Station W,Station G
+R005,Route 5,Station H,Station A
+R006,Route 6,Station U,Station Q
+R007,Route 7,Station M,Station P
+R008,Route 8,Station W,Station Z
+R009,Route 9,Station S,Station A
+R010,Route 10,Station E,Station N
