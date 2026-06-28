@@ -1,0 +1,40 @@
+# ABOUTME: Git ignore configuration for the project (Python, Terraform, and Local Docs)
+
+# macOS system files
+.DS_Store
+
+# Antigravity files
+.antigravitycli/
+
+# Python ignore list
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# Terraform ignore list
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+_override.tf
+_override.tf.json
+.terraformrc
+terraform.rc
+
+# 2. Add an exception for backend-shared.tfvars
+!*backend-shared.tfvars
+!*defaults.tfvars
+
+# Local-only context files
+docs/
+AGENT.md
