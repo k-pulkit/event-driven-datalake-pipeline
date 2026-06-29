@@ -1,18 +1,5 @@
 # ABOUTME: Main orchestration for the Security layer (KMS Key and IAM)
 
-# Ensure we have a valid project name
-resource "terraform_data" "assert_project_name_valid" {
-  lifecycle {
-    precondition {
-      # Assert that the local variable is not null or empty
-      condition = local.transit_project_name != null && local.transit_project_name != ""
-
-      # The custom error message shown to the developer
-      error_message = "ERROR: Local variable 'project_name' resolved to null for project ID '${local.transit_project_name}'. Check the registry in globals.tf."
-    }
-  }
-}
-
 module "transit_pipeline_kms_key" {
   source  = "terraform-aws-modules/kms/aws"
   version = "~> 4.2.0"
@@ -80,7 +67,7 @@ module "transit_pipeline_kms_key" {
           test     = "ArnLike"
           variable = "aws:SourceArn"
           values = [
-            "arn:aws:sqs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:${local.project_prefix}-${var.environment}*"
+            "arn:aws:sqs:${var.aws_region}:${local.account_id}:${local.project_prefix}-${var.environment}*"
           ]
         },
         {

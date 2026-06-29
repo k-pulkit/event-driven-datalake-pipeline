@@ -36,7 +36,7 @@ module "raw_ingest_sqs_queue" {
           test     = "StringEquals"
           variable = "aws:SourceAccount"
           values = [
-            "${data.aws_caller_identity.current.account_id}"
+            "${local.account_id}"
           ]
         },
         {
