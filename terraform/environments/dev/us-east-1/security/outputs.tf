@@ -19,7 +19,7 @@ output "sfn_execution_role_arn" {
   value       = aws_iam_role.sfn_execution_role.arn
 }
 
-output "pipe_execution_role_arn" {
-  description = "The ARN of the IAM role for EventBridge Pipe execution"
-  value       = aws_iam_role.pipe_execution_role.arn
+output "eventbridge_sfn_target_role_arn" {
+  description = "The ARN of the IAM role for EventBridge to trigger Step Functions"
+  value       = aws_iam_role.eventbridge_sfn_target_role.arn
 }

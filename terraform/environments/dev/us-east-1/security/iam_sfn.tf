@@ -43,6 +43,54 @@ resource "aws_iam_role_policy" "sfn_execution_policy" {
           "arn:aws:glue:${var.aws_region}:${local.account_id}:job/${local.project_prefix}-*"
         ]
       },
+      # SQS Queue Access (Polling and Deleting)
+      {
+        Sid    = "SQSQueueAccess"
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:DeleteMessageBatch",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = [
+          "arn:aws:sqs:${var.aws_region}:${local.account_id}:${local.project_prefix}-${var.environment}-*"
+        ]
+      },
+      # KMS Decryption for SQS
+      {
+        Sid    = "KMSDecryptAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = [
+          module.transit_pipeline_kms_key.key_arn
+        ]
+      },
+      # Step Functions Self-Lookup (concurrency check)
+      {
+        Sid    = "SFNSelfLookup"
+        Effect = "Allow"
+        Action = [
+          "states:ListExecutions"
+        ]
+        Resource = [
+          "arn:aws:states:${var.aws_region}:${local.account_id}:stateMachine:${local.project_prefix}-${var.environment}-orchestrator"
+        ]
+      },
+      # SNS Alerting Access
+      {
+        Sid    = "SNSAlertingAccess"
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = [
+          "arn:aws:sns:${var.aws_region}:${local.account_id}:${local.project_prefix}-${var.environment}-alerts"
+        ]
+      },
       # CloudWatch Logging / Log Delivery
       {
         Sid    = "CloudWatchLogsDelivery"
