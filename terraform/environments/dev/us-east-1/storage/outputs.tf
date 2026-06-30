@@ -33,3 +33,13 @@ output "dlq_url" {
   description = "The URL of the DLQ SQS queue"
   value       = module.raw_ingest_sqs_queue.dead_letter_queue_arn
 }
+
+output "landing_db_name" {
+  description = "The name of the Glue Landing Data Catalog Database"
+  value       = aws_glue_catalog_database.landing_db.name
+}
+
+output "silver_db_name" {
+  description = "The name of the Glue Silver Data Catalog Database"
+  value       = aws_glue_catalog_database.silver_db.name
+}

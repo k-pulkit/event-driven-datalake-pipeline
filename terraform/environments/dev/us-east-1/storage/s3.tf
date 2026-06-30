@@ -83,6 +83,7 @@ resource "aws_s3_bucket_notification" "raw_ingestion_event_notification" {
   queue {
     queue_arn     = module.raw_ingest_sqs_queue.queue_arn
     events        = ["s3:ObjectCreated:*"]
+    filter_prefix = "incoming/"
     filter_suffix = ".csv"
   }
 

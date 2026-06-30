@@ -2,8 +2,9 @@
 locals {
   transit_project_id = "transit-pipeline"
 
-  account_id        = data.aws_caller_identity.current.account_id
-  kms_master_key_id = data.terraform_remote_state.security.outputs.kms_key_id
+  account_id         = data.aws_caller_identity.current.account_id
+  kms_master_key_id  = data.terraform_remote_state.security.outputs.kms_key_id
+  kms_master_key_arn = data.terraform_remote_state.security.outputs.kms_key_arn
 
   transit_project_name = lookup(var.project_name_mapping, local.transit_project_id, null)
   project_prefix       = "${var.namespace}-${local.transit_project_name}"
