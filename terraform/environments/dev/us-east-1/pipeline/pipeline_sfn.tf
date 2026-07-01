@@ -47,6 +47,6 @@ resource "aws_scheduler_schedule" "transit_pipeline_schedule" {
 # 3. SNS TOPIC FOR PIPELINE ALERTS
 # ==========================================
 resource "aws_sns_topic" "pipeline_alerts" {
-  name = "${local.project_prefix}-${var.environment}-alerts"
+  name = "${var.namespace}-${var.environment}-alerts-topic"
   tags = local.tags
 }

@@ -88,7 +88,7 @@ resource "aws_iam_role_policy" "sfn_execution_policy" {
           "sns:Publish"
         ]
         Resource = [
-          "arn:aws:sns:${var.aws_region}:${local.account_id}:${local.project_prefix}-${var.environment}-alerts"
+          "arn:aws:sns:${var.aws_region}:${local.account_id}:${var.namespace}-${var.environment}-alerts-topic"
         ]
       },
       # S3 Read Access for Run Metadata
