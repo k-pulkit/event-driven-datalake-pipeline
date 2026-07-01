@@ -1,7 +1,13 @@
 -- Query to calculate daily ridership summary by trip_date, route_id, and vehicle_type
 -- Employs dynamic partition pruning on start_time and window functions to find hourly peaks
 
-WITH hourly_counts AS (
+WITH trips_source AS (
+    SELECT *
+    FROM "edai_city_transit_pipeline_dev_silver_db"."silver_trips_active" FOR VERSION AS OF 'test_branch'
+    -- Centralized partition filter for the target date range
+    WHERE CAST(start_time AS DATE) BETWEEN DATE '2025-01-01' AND DATE '2026-01-01'
+),
+hourly_counts AS (
     SELECT 
         CAST(t.start_time AS DATE) AS trip_date,
         t.route_id,
@@ -9,11 +15,9 @@ WITH hourly_counts AS (
         EXTRACT(HOUR FROM t.start_time) AS trip_hour,
         COUNT(t.trip_id) AS hour_trip_count
     FROM 
-        {silver_database}.silver_trips_active t
+        trips_source t
     JOIN 
-        {landing_database}.raw_vehicles v ON t.vehicle_id = v.vehicle_id
-    WHERE 
-        CAST(t.start_time AS DATE) BETWEEN DATE '{start_date}' AND DATE '{end_date}'
+        edai_city_transit_pipeline_dev_landing_db.raw_vehicles v ON t.vehicle_id = v.vehicle_id
     GROUP BY 
         1, 2, 3, 4
 ),
@@ -43,11 +47,9 @@ base_metrics AS (
         SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS trips_completed,
         SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) AS trips_in_progress
     FROM 
-        {silver_database}.silver_trips_active t
+        trips_source t
     JOIN 
-        {landing_database}.raw_vehicles v ON t.vehicle_id = v.vehicle_id
-    WHERE 
-        CAST(t.start_time AS DATE) BETWEEN DATE '{start_date}' AND DATE '{end_date}'
+        edai_city_transit_pipeline_dev_landing_db.raw_vehicles v ON t.vehicle_id = v.vehicle_id
     GROUP BY 
         1, 2, 3
 )

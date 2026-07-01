@@ -1,7 +1,12 @@
 -- Query to identify statistical duration and distance outliers for a specific query date
 -- Computes baseline statistics over a 7-day look-back window relative to the query date
 
-WITH route_stats AS (
+WITH trips_source AS (
+    SELECT *
+    FROM "edai_city_transit_pipeline_dev_silver_db"."silver_trips_active" FOR VERSION AS OF 'test_branch'
+    WHERE CAST(start_time AS DATE) BETWEEN DATE '{query_date}' - INTERVAL '7' DAY AND DATE '{query_date}'
+),
+route_stats AS (
     -- Calculate baseline duration statistics over the past 7 days ending on query_date
     SELECT 
         t.route_id,
@@ -9,13 +14,12 @@ WITH route_stats AS (
         AVG(date_diff('minute', t.start_time, t.end_time)) AS avg_duration_minutes,
         STDDEV(date_diff('minute', t.start_time, t.end_time)) AS stddev_duration_minutes
     FROM 
-        {silver_database}.silver_trips_active t
+        trips_source t
     JOIN 
-        {landing_database}.raw_vehicles v ON t.vehicle_id = v.vehicle_id
+        edai_city_transit_pipeline_dev_landing_db.raw_vehicles v ON t.vehicle_id = v.vehicle_id
     WHERE 
         t.status = 'completed'
         AND t.end_time IS NOT NULL
-        AND t.start_time BETWEEN DATE '{query_date}' - INTERVAL '7' DAY AND DATE '{query_date}'
     GROUP BY 
         1, 2
 ),
@@ -31,9 +35,9 @@ current_trips AS (
         t.distance_km,
         date_diff('minute', t.start_time, t.end_time) AS duration_minutes
     FROM 
-        {silver_database}.silver_trips_active t
+        trips_source t
     JOIN 
-        {landing_database}.raw_vehicles v ON t.vehicle_id = v.vehicle_id
+        edai_city_transit_pipeline_dev_landing_db.raw_vehicles v ON t.vehicle_id = v.vehicle_id
     WHERE 
         CAST(t.start_time AS DATE) = DATE '{query_date}'
         AND t.status = 'completed'
