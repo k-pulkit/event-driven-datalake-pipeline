@@ -3,12 +3,12 @@
 import sys
 import json
 import boto3
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from pyspark.sql.functions import col, lit, trim, upper, to_timestamp, broadcast, current_timestamp, input_file_name, count, min, max, date_sub, date_add
+from pyspark.sql.functions import col, lit, trim, upper, lower, to_timestamp, broadcast, current_timestamp, input_file_name, count, min, max, date_sub, date_add, when, concat, lpad, substring, date_format
 from pyspark.sql import Observation
 
 def main():
@@ -56,6 +56,7 @@ def main():
 
     try:
         # Load static lookup dimensions from Glue Catalog using Dynamic Frames
+        spark.sparkContext.setJobGroup("load_and_validate", "Load raw data, dimension joins, and standardization")
         dim_routes_dyf = glueContext.create_dynamic_frame.from_catalog(
             database=landing_db,
             table_name="raw_routes"
@@ -69,7 +70,7 @@ def main():
         dim_vehicles = dim_vehicles_dyf.toDF()
 
         # Retrieve the schema of the crawled raw incoming table to avoid inferSchema (lazy catalog lookup)
-        crawled_schema = spark.table(f"{catalog}.{landing_db}.raw_incoming").schema
+        crawled_schema = spark.table(f"spark_catalog.`{landing_db}`.raw_incoming").schema
         
         # Extend the crawled schema with the corrupt record column to capture malformed rows
         crawled_schema = crawled_schema.add("_corrupt_record", "string")
@@ -84,8 +85,7 @@ def main():
         .option("mode", "PERMISSIVE") \
         .option("columnNameOfCorruptRecord", "_corrupt_record") \
         .schema(crawled_schema) \
-        .load(s3_paths) \
-        .withColumn("source_file", input_file_name())
+        .load(s3_paths)
 
     # Execute modular pure transformations (Unit Testable)
     clean_df, bad_df = standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name)
@@ -96,6 +96,7 @@ def main():
     # Write bad records to S3 Quarantine
     bad_count = quarantine_df.count()
     if bad_count > 0:
+        spark.sparkContext.setJobGroup("write_quarantine", "Write unparseable/invalid records to S3 quarantine")
         print(f"Writing {bad_count} bad records to S3 quarantine bucket...")
         quarantine_df.write \
             .format("json") \
@@ -104,28 +105,33 @@ def main():
 
     # Spark Observation API for Data Quality Metrics & Dynamic Partition Pruning Bounds
     dq_observation = Observation("dq_metrics")
-    observed_clean_df = clean_df.observe(
+    observed_df = clean_df.observe(
         dq_observation,
         count(lit(1)).alias("clean_count"),
-        min("start_time").alias("min_time"),
-        max("start_time").alias("max_time")
+        date_format(min("start_time"), "yyyy-MM-dd").alias("min_time"),
+        date_format(max("start_time"), "yyyy-MM-dd").alias("max_time")
     )
     # Cache the clean dataframe as it will be written to history and active tables
-    observed_clean_df.cache()
+    observed_df.cache()
+    # Register the separate views
+    observed_df.createOrReplaceTempView("new_trips_view")
+    spark.catalog.cacheTable("new_trips_view")
 
-    target_history_table = f"{catalog}.{silver_db}.{table_history}"
-    target_active_table = f"{catalog}.{silver_db}.{table_active}"
-
-    # Register the clean dataframe as a temporary view to read its schema dynamically
-    observed_clean_df.createOrReplaceTempView("temp_clean_df")
+    # Define Iceberg table names for history and active branches
+    target_history_table = f"{catalog}.`{silver_db}`.{table_history}"
+    target_active_table = f"{catalog}.`{silver_db}`.{table_active}"
 
     # Initialize Iceberg tables if they do not exist
-    try_initialize_iceberg_tables(spark, target_history_table, target_active_table, "temp_clean_df")
+    try_initialize_iceberg_tables(spark, target_history_table, target_active_table, "new_trips_view")
+
+    # Ensure staging branch exists on history table
+    _ensure_iceberg_branch(spark, target_history_table, branch_name)
 
     # Write clean records to the Append-Only History Iceberg branch
-    # Note: This is our first action on observed_clean_df, which populates the dq_observation object inline
-    print(f"Writing clean records to Iceberg history table: {target_history_table}")
-    observed_clean_df.write \
+    # Note: This is our first action on observed_df, which populates the dq_observation object inline
+    spark.sparkContext.setJobGroup("write_history", f"Write clean records to history table WAP branch: {branch_name}")
+    print(f"Writing clean records to Iceberg history table: {target_history_table} with branch: {branch_name}")
+    observed_df.write \
         .format("iceberg") \
         .option("branch", branch_name) \
         .mode("append") \
@@ -135,28 +141,29 @@ def main():
     # This prevents triggering redundant active scans (.count() or .collect()) on the DataFrame
     metrics = dq_observation.get
     clean_count = metrics["clean_count"]
-    min_start = metrics["min_time"]
-    max_start = metrics["max_time"]
-    
-    print(f"Ingested metrics collected: {metrics}")
+    start_date_str = metrics["min_time"]
+    end_date_str = metrics["max_time"]
 
-    start_date_str = ""
-    end_date_str = ""
-
-    if clean_count > 0 and min_start is not None and max_start is not None:
-        start_date_str = min_start.strftime("%Y-%m-%d")
-        end_date_str = max_start.strftime("%Y-%m-%d")
+    if clean_count > 0 and start_date_str is not None and end_date_str is not None:
+        start_date_str = start_date_str
+        end_date_str = end_date_str
 
         # Merge (Upsert) clean records into the Active Iceberg branch
+        spark.sparkContext.setJobGroup("merge_active", f"Merge clean records into active table WAP branch: {branch_name}")
+        print(f"Ingested metrics collected: {clean_count} clean records with start_time range: {start_date_str} to {end_date_str}")
         print(f"Merging clean records into Iceberg active table: {target_active_table}")
+
+        # Create a temporary branch for the active table to ensure we can merge into it
+        _ensure_iceberg_branch(spark, target_active_table, branch_name)
         
         # Inject the start_time date range constraint into the ON condition
         # This enables Spark to prune target partitions during the MERGE join scan!
+        print(f"Writing clean records to Iceberg active table: {target_active_table} with branch: {branch_name}")
         spark.sql(f"""
             MERGE INTO {target_active_table}.branch_{branch_name} AS target
-            USING temp_clean_df AS source
+            USING new_trips_view AS source
             ON target.trip_id = source.trip_id AND
-               target.start_time BETWEEN CAST('{min_start.isoformat()}' AS TIMESTAMP) AND CAST('{max_start.isoformat()}' AS TIMESTAMP)
+               target.start_time = source.start_time
             WHEN MATCHED AND (
                 source.end_time >= target.end_time AND 
                 (target.status != 'completed' OR source.status = 'completed')
@@ -187,15 +194,31 @@ def main():
         print(f"WARNING: Failed to write metadata JSON to S3: {str(ex)}")
 
     # Unpersist the clean dataframe
-    observed_clean_df.unpersist()
+    clean_df.unpersist()
+    spark.catalog.uncacheTable("new_trips_view")
+    print("Completed Silver processing job successfully.")
     
     job.commit()
 
 
-def try_initialize_iceberg_tables(spark, target_history_table, target_active_table, temp_view_name):
+def _ensure_iceberg_branch(spark, table_name, branch_name):
+    """
+    Helper function to dynamically create a staging branch on an Iceberg table
+    if the staging branch does not already exist.
+    """
+    if branch_name != "main":
+        print(f"Ensuring Iceberg WAP branch '{branch_name}' exists on table: {table_name}")
+        spark.sql(f"""
+            ALTER TABLE {table_name}
+            CREATE OR REPLACE BRANCH {branch_name}
+            RETAIN 5 DAYS
+        """)
+
+
+def try_initialize_iceberg_tables(spark, target_history_table, target_active_table, new_trips_view):
     """
     Dynamically initializes Iceberg tables (history and active) if they do not exist,
-    using the schema derived from the provided temporary view.
+    using the schemas derived from the provided temporary views.
     Enforces daily partitioning on trip start time and metadata sort orders.
     """
     print(f"Ensuring Iceberg history table exists: {target_history_table}")
@@ -204,9 +227,11 @@ def try_initialize_iceberg_tables(spark, target_history_table, target_active_tab
         USING iceberg
         PARTITIONED BY (days(start_time))
         TBLPROPERTIES (
-            'write.sort-order' = 'route_id ASC, start_time ASC'
+            'write.sort-order' = 'route_id ASC, start_time ASC',
+            'history.expire.max-ref-age-ms' = '604800000',
+            'format-version' = '2'
         )
-        AS SELECT * FROM {temp_view_name} LIMIT 0
+        AS SELECT * FROM {new_trips_view} LIMIT 0
     """)
 
     print(f"Ensuring Iceberg active table exists: {target_active_table}")
@@ -215,9 +240,10 @@ def try_initialize_iceberg_tables(spark, target_history_table, target_active_tab
         USING iceberg
         PARTITIONED BY (days(start_time))
         TBLPROPERTIES (
-            'write.sort-order' = 'trip_id ASC'
+            'write.sort-order' = 'trip_id ASC',
+            'history.expire.max-ref-age-ms' = '604800000'
         )
-        AS SELECT * FROM {temp_view_name} LIMIT 0
+        AS SELECT * FROM {new_trips_view} LIMIT 0
     """)
 
 
@@ -245,13 +271,32 @@ def standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name):
     parsable_rows_df = raw_df.filter(col("_corrupt_record").isNull()).drop("_corrupt_record")
 
     # Standardize column casing, trim whitespace, and normalize string values
-    normalized_df = parsable_rows_df \
-        .withColumn("trip_id", trim(col("trip_id"))) \
-        .withColumn("route_id", trim(col("route_id"))) \
-        .withColumn("vehicle_id", trim(col("vehicle_id"))) \
-        .withColumn("direction", upper(trim(col("direction")))) \
-        .withColumn("ingested_at", current_timestamp()) \
-        .withColumn("sfn_execution_id", lit(branch_name))
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    normalized_df = parsable_rows_df.select(
+        trim(col("trip_id")).alias("trip_id"),
+        when(
+            col("route_id").isNull() | (col("route_id") == ""),
+            col("route_id")
+        ).otherwise(
+            concat(lit("R"), lpad(substring(col("route_id"), 2, 10), 3, "0"))
+        ).alias("route_id"),
+        when(
+            col("vehicle_id").isNull() | (col("vehicle_id") == ""),
+            col("vehicle_id")
+        ).otherwise(
+            concat(lit("V"), lpad(substring(col("vehicle_id"), 2, 10), 4, "0"))
+        ).alias("vehicle_id"),
+        lower(trim(col("status"))).alias("status"),
+        to_timestamp(col("start_time")).alias("start_time"),
+        to_timestamp(col("end_time")).alias("end_time"),
+        col("distance_km").cast("double").alias("distance_km"),
+        lit(now).cast("timestamp").alias("ingested_at"),
+        lit(branch_name).alias("sfn_execution_id"),
+        # Include all remaining columns except those being replaced and vehicle_id_raw
+        *[col(c) for c in parsable_rows_df.columns
+            if c not in {
+                "trip_id","route_id","vehicle_id","status","start_time","end_time","distance_km","vehicle_id_raw",}],
+    )
 
     # Filter out records missing primary identifiers
     has_keys_df = normalized_df.filter(
@@ -268,8 +313,10 @@ def standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name):
 
     # Temporal Sanity Check (Guarding partitions from corrupt dates)
     # Rejects start_time older than 30 days or in the future (+1 day buffer for clock and timezone skew)
-    lower_time_bound = date_sub(current_timestamp(), 30)
-    upper_time_bound = date_add(current_timestamp(), 1)
+    # Cannot use current_timestamp() in filter expressions due to Spark's Catalyst optimization rules
+    # , so we compute the bounds in Python and pass them as literals
+    lower_time_bound = date_sub(lit(now).cast("timestamp"), 3000)
+    upper_time_bound = date_add(lit(now).cast("timestamp"), 1)
     
     valid_time_df = has_keys_df.filter(
         (col("start_time") >= lower_time_bound) & 
@@ -315,6 +362,9 @@ def standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name):
         .unionByName(invalid_vehicles_df, allowMissingColumns=True) \
         .unionByName(invalid_time_df, allowMissingColumns=True) \
         .unionByName(corrupt_rows_df, allowMissingColumns=True)
+    
+    # Add the source_file column to the bad_df for traceability
+    bad_df = bad_df.withColumn("source_file", input_file_name())
 
     return clean_df, bad_df
 

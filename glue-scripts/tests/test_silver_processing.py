@@ -32,11 +32,11 @@ def test_schemas():
         StructField("trip_id", StringType(), True),
         StructField("vehicle_id", StringType(), True),
         StructField("route_id", StringType(), True),
-        StructField("direction", StringType(), True),
         StructField("start_time", TimestampType(), True),
         StructField("end_time", TimestampType(), True),
         StructField("distance_km", DoubleType(), True),
         StructField("status", StringType(), True),
+        StructField("vehicle_id_raw", StringType(), True),
         StructField("source_file", StringType(), True),
         StructField("_corrupt_record", StringType(), True)
     ])
@@ -55,16 +55,15 @@ def test_standardize_and_validate_success(spark_session, test_schemas):
     is routed to clean_df, while standardizing string fields.
     """
     # Create mock route and vehicle dimension DataFrames using fixture schemas
-    mock_routes = spark_session.createDataFrame([("R01",), ("R02",)], schema=test_schemas["routes"])
-    mock_vehicles = spark_session.createDataFrame([("v001",), ("v002",)], schema=test_schemas["vehicles"])
+    mock_routes = spark_session.createDataFrame([("R001",), ("R002",)], schema=test_schemas["routes"])
+    mock_vehicles = spark_session.createDataFrame([("V0001",), ("V0002",)], schema=test_schemas["vehicles"])
 
     # Define a valid current timestamp for the trip start/end times
     valid_now = datetime.now(timezone.utc)
 
-    # Create mock raw trips DataFrame containing a clean record
     mock_raw_trips = spark_session.createDataFrame([
-        # Clean record: trip_id is present, vehicle & route match dimensions, direction is lowercase, start/end dates are valid
-        ("1438575a", "v001", "R01", "outbound", valid_now, valid_now, 17.68, "completed", "s3://landing/trips.csv", None)
+        # Clean record: trip_id is present, vehicle & route match dimensions, start/end dates are valid, with raw duplicate
+        ("1438575a", "v001", "R01", valid_now, valid_now, 17.68, "completed", "V001", "s3://landing/trips.csv", None)
     ], schema=test_schemas["trips"])
 
     # Execute transformations
@@ -74,9 +73,12 @@ def test_standardize_and_validate_success(spark_session, test_schemas):
     assert clean_df.count() == 1
     assert bad_df.count() == 0
 
-    # Verify normalization (direction converted to UPPERCASE)
+    # Verify normalization (status converted to lowercase, duplicate dropped, route and vehicle padded)
     normalized_row = clean_df.collect()[0]
-    assert normalized_row["direction"] == "OUTBOUND"
+    assert "vehicle_id_raw" not in clean_df.columns
+    assert normalized_row["status"] == "completed"
+    assert normalized_row["route_id"] == "R001"
+    assert normalized_row["vehicle_id"] == "V0001"
     assert normalized_row["sfn_execution_id"] == "test_sfn_execution"
 
 
@@ -86,16 +88,16 @@ def test_standardize_and_validate_missing_keys(spark_session, test_schemas):
     Verifies that records missing critical primary keys (trip_id, route_id, or vehicle_id)
     are caught and routed to bad_df with the appropriate quarantine reason.
     """
-    mock_routes = spark_session.createDataFrame([("R01",)], schema=test_schemas["routes"])
-    mock_vehicles = spark_session.createDataFrame([("v001",)], schema=test_schemas["vehicles"])
+    mock_routes = spark_session.createDataFrame([("R001",)], schema=test_schemas["routes"])
+    mock_vehicles = spark_session.createDataFrame([("V0001",)], schema=test_schemas["vehicles"])
 
     valid_now = datetime.now(timezone.utc)
 
     mock_raw_trips = spark_session.createDataFrame([
         # Missing trip_id (with valid dates)
-        (None, "v001", "R01", "outbound", valid_now, valid_now, 10.0, "completed", "s3://landing/trips.csv", None),
+        (None, "v001", "R01", valid_now, valid_now, 10.0, "completed", "V001", "s3://landing/trips.csv", None),
         # Empty route_id (with valid dates)
-        ("1438575b", "v001", "", "outbound", valid_now, valid_now, 10.0, "completed", "s3://landing/trips.csv", None)
+        ("1438575b", "v001", "", valid_now, valid_now, 10.0, "completed", "V001", "s3://landing/trips.csv", None)
     ], schema=test_schemas["trips"])
 
     clean_df, bad_df = standardize_and_validate(mock_raw_trips, mock_routes, mock_vehicles, "test_sfn_execution")
@@ -115,16 +117,16 @@ def test_standardize_and_validate_referential_integrity(spark_session, test_sche
     Verifies that records with route_id or vehicle_id values missing from the dimension tables
     are correctly partitioned to bad_df.
     """
-    mock_routes = spark_session.createDataFrame([("R01",)], schema=test_schemas["routes"])
-    mock_vehicles = spark_session.createDataFrame([("v001",)], schema=test_schemas["vehicles"])
+    mock_routes = spark_session.createDataFrame([("R001",)], schema=test_schemas["routes"])
+    mock_vehicles = spark_session.createDataFrame([("V0001",)], schema=test_schemas["vehicles"])
 
     valid_now = datetime.now(timezone.utc)
 
     mock_raw_trips = spark_session.createDataFrame([
         # Route ID missing from dimensions
-        ("T1", "v001", "R99", "outbound", valid_now, valid_now, 15.0, "completed", "s3://landing/trips.csv", None),
+        ("T1", "v001", "R99", valid_now, valid_now, 15.0, "completed", "V001", "s3://landing/trips.csv", None),
         # Vehicle ID missing from dimensions
-        ("T2", "v999", "R01", "inbound", valid_now, valid_now, 15.0, "completed", "s3://landing/trips.csv", None)
+        ("T2", "v999", "R01", valid_now, valid_now, 15.0, "completed", "V999", "s3://landing/trips.csv", None)
     ], schema=test_schemas["trips"])
 
     clean_df, bad_df = standardize_and_validate(mock_raw_trips, mock_routes, mock_vehicles, "test_sfn_execution")
@@ -147,8 +149,8 @@ def test_standardize_and_validate_corrupt_record(spark_session, test_schemas):
     Verifies that rows flagged by Spark's permissive CSV reader as malformed (unparseable lines)
     are separated and routed to bad_df.
     """
-    mock_routes = spark_session.createDataFrame([("R01",)], schema=test_schemas["routes"])
-    mock_vehicles = spark_session.createDataFrame([("v001",)], schema=test_schemas["vehicles"])
+    mock_routes = spark_session.createDataFrame([("R001",)], schema=test_schemas["routes"])
+    mock_vehicles = spark_session.createDataFrame([("V0001",)], schema=test_schemas["vehicles"])
 
     mock_raw_trips = spark_session.createDataFrame([
         # Row has corrupt CSV data
@@ -171,17 +173,17 @@ def test_standardize_and_validate_temporal_sanity(spark_session, test_schemas):
     Verifies that records with start_time values unreasonably in the past (>30 days)
     or in the future are isolated and routed to bad_df.
     """
-    mock_routes = spark_session.createDataFrame([("R01",)], schema=test_schemas["routes"])
-    mock_vehicles = spark_session.createDataFrame([("v001",)], schema=test_schemas["vehicles"])
+    mock_routes = spark_session.createDataFrame([("R001",)], schema=test_schemas["routes"])
+    mock_vehicles = spark_session.createDataFrame([("V0001",)], schema=test_schemas["vehicles"])
 
     past_date = datetime.now(timezone.utc) - timedelta(days=45)
     future_date = datetime.now(timezone.utc) + timedelta(days=5)
 
     mock_raw_trips = spark_session.createDataFrame([
         # Start time too far in the past (45 days ago)
-        ("T1", "v001", "R01", "outbound", past_date, None, 10.0, "completed", "s3://landing/trips.csv", None),
+        ("T1", "v001", "R01", past_date, None, 10.0, "completed", "V001", "s3://landing/trips.csv", None),
         # Start time in the future (5 days ahead)
-        ("T2", "v001", "R01", "inbound", future_date, None, 10.0, "completed", "s3://landing/trips.csv", None)
+        ("T2", "v001", "R01", future_date, None, 10.0, "completed", "V001", "s3://landing/trips.csv", None)
     ], schema=test_schemas["trips"])
 
     clean_df, bad_df = standardize_and_validate(mock_raw_trips, mock_routes, mock_vehicles, "test_sfn_execution")
