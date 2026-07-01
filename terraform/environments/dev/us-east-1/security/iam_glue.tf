@@ -52,7 +52,8 @@ resource "aws_iam_role_policy" "glue_job_policy" {
           "kms:Decrypt",
           "kms:Encrypt",
           "kms:GenerateDataKey*",
-          "kms:DescribeKey"
+          "kms:DescribeKey",
+          "kms:CreateGrant"
         ]
         Resource = [
           module.transit_pipeline_kms_key.key_arn
@@ -86,7 +87,8 @@ resource "aws_iam_role_policy" "glue_job_policy" {
         Effect = "Allow"
         Action = [
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
+          "logs:AssociateKmsKey"
         ]
         Resource = [
           "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws-glue/jobs/*",

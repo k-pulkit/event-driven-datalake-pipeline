@@ -77,6 +77,34 @@ module "transit_pipeline_kms_key" {
             "sqs.${var.aws_region}.amazonaws.com"
           ]
       }]
+    },
+    {
+      sid = "CloudWatchLogsAccess"
+
+      actions = [
+        "kms:Encrypt*",
+        "kms:Decrypt*",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Describe*"
+      ]
+
+      resources = ["*"]
+
+      principals = [{
+        type        = "Service"
+        identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+      }]
+
+      condition = [
+        {
+          test     = "ArnLike"
+          variable = "kms:EncryptionContext:aws:logs:arn"
+          values = [
+            "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws-glue/jobs/*"
+          ]
+        }
+      ]
     }
   ]
 
