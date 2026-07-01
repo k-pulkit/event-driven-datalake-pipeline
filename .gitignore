@@ -3,6 +3,11 @@
 # macOS system files
 .DS_Store
 
+# local metastore
+metastore_db/
+warehouse/
+derby.log
+
 # Antigravity files
 .antigravitycli/
 
@@ -38,3 +43,6 @@ terraform.rc
 # Local-only context files
 docs/
 AGENT.md
+
+# Vscode
+.vscode/
