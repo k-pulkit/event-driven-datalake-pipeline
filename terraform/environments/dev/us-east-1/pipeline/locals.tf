@@ -22,6 +22,9 @@ locals {
   quarantine_bucket_id = data.terraform_remote_state.storage.outputs.quarantine_bucket_id
   processed_bucket_id  = data.terraform_remote_state.storage.outputs.processed_bucket_id
 
+  # RDS Database and Network connection details
+  rds_secret_name       = data.terraform_remote_state.storage.outputs.rds_secret_name
+
   # Glue jobs names (placeholders)
   glue_silver_job_name = "${local.project_prefix}-${var.environment}-silver-processing"
   glue_gold_job_name   = "${local.project_prefix}-${var.environment}-gold-aggregation"

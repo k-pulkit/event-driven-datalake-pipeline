@@ -94,6 +94,17 @@ resource "aws_iam_role_policy" "glue_job_policy" {
           "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws-glue/jobs/*",
           "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws-glue/jobs/*:*"
         ]
+      },
+      # Secrets Manager access for RDS credentials
+      {
+        Sid    = "SecretsManagerAccess"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:${var.namespace}-analytics-${var.environment}-rds-secret-*"
+        ]
       }
     ]
   })

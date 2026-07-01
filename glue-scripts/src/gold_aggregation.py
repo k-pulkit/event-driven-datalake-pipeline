@@ -1,12 +1,32 @@
 # or ABOUTME: Structured Gold PySpark Job running partition-pruned aggregations and transactional PostgreSQL upserts (WAP pattern)
 
 import sys
+import json
+import boto3
 from datetime import datetime, timedelta
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
 from pyspark.sql.functions import col, count, min, max, date_trunc, explode, array, lit, to_timestamp, broadcast
+
+def get_rds_credentials(secret_name, region_name):
+    """
+    Retrieves database host and credentials securely from AWS Secrets Manager.
+    """
+    from botocore.exceptions import ClientError
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+    try:
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+    except ClientError as e:
+        print(f"CRITICAL ERROR: Failed to retrieve database credentials secret '{secret_name}' from Secrets Manager: {str(e)}")
+        raise e
+    secret = get_secret_value_response['SecretString']
+    return json.loads(secret)
 
 def main():
     required_args = [
@@ -18,7 +38,8 @@ def main():
         "silver_table_history",
         "iceberg_branch_name",
         "start_date",
-        "end_date"
+        "end_date",
+        "rds_secret_name"
     ]
 
     # Resolve command-line options
@@ -37,6 +58,18 @@ def main():
     branch_name = args["iceberg_branch_name"]
     start_date = str(args["start_date"]).strip()
     end_date = str(args["end_date"]).strip()
+    rds_secret_name = args["rds_secret_name"]
+
+    # Resolve database credentials securely from AWS Secrets Manager at runtime
+    region_name = boto3.session.Session().region_name or "us-east-1"
+    print(f"Resolving database credentials from Secrets Manager secret '{rds_secret_name}' in region '{region_name}'...")
+    db_creds = get_rds_credentials(rds_secret_name, region_name)
+
+    rds_host = db_creds["host"]
+    rds_port = db_creds["port"]
+    rds_db_name = db_creds["db_name"]
+    rds_username = db_creds["username"]
+    rds_password = db_creds["password"]
 
     print(f"Reading from Iceberg active table: {catalog}.{silver_db}.{table_active}")
     print(f"Processing branch: {branch_name}")
@@ -118,41 +151,110 @@ def main():
     outliers_df = compute_outliers(spark, start_date, end_date, branch_name)
 
     # 5. Load aggregates to RDS PostgreSQL (Staging-to-Target Upsert Pattern)
-    # Note: JDBC connection properties and secrets will be resolved in Phase 4.
-    # We stub the staging-upsert pattern:
     print("Writing aggregates to RDS PostgreSQL database via transactional staging-upsert flow...")
     
-    # TODO: Resolve connection properties from AWS Secrets Manager during Phase 4
-    # jdbc_url = "jdbc:postgresql://<rds-endpoint>:5432/<db-name>"
-    # db_properties = {
-    #     "user": "<user>",
-    #     "password": "<password>",
-    #     "driver": "org.postgresql.Driver"
-    # }
+    jdbc_url = f"jdbc:postgresql://{rds_host}:{rds_port}/{rds_db_name}"
+    print(f"Target JDBC URL: {jdbc_url}")
     
-    # Example execution pattern for Daily Ridership:
-    # staging_table = "stage_gold_daily_ridership"
-    # daily_ridership_df.write.jdbc(url=jdbc_url, table=staging_table, mode="overwrite", properties=db_properties)
-    #
-    # upsert_sql = """
-    #     INSERT INTO gold_daily_ridership (
-    #         trip_date, route_id, vehicle_type, total_trips, unique_vehicles, 
-    #         avg_capacity, avg_duration_minutes, max_duration_minutes, 
-    #         trips_completed, trips_in_progress, peak_hour
-    #     )
-    #     SELECT * FROM stage_gold_daily_ridership
-    #     ON CONFLICT (trip_date, route_id, vehicle_type) 
-    #     DO UPDATE SET 
-    #         total_trips = EXCLUDED.total_trips,
-    #         unique_vehicles = EXCLUDED.unique_vehicles,
-    #         avg_capacity = EXCLUDED.avg_capacity,
-    #         avg_duration_minutes = EXCLUDED.avg_duration_minutes,
-    #         max_duration_minutes = EXCLUDED.max_duration_minutes,
-    #         trips_completed = EXCLUDED.trips_completed,
-    #         trips_in_progress = EXCLUDED.trips_in_progress,
-    #         peak_hour = EXCLUDED.peak_hour
-    # """
-    # Execute upsert in Postgres JVM Connection, and drop staging_table
+    db_properties = {
+        "user": rds_username,
+        "password": rds_password,
+        "driver": "org.postgresql.Driver"
+    }
+
+    # Write DataFrames to temporary staging tables
+    print("Writing Daily Ridership metrics to staging table...")
+    daily_ridership_df.write.jdbc(url=jdbc_url, table="stage_gold_daily_ridership", mode="overwrite", properties=db_properties)
+
+    print("Writing Weekly Top Routes metrics to staging table...")
+    weekly_top_routes_df.write.jdbc(url=jdbc_url, table="stage_gold_top_routes_weekly", mode="overwrite", properties=db_properties)
+
+    print("Writing Trip Outliers metrics to staging table...")
+    outliers_df.write.jdbc(url=jdbc_url, table="stage_gold_trip_outliers", mode="overwrite", properties=db_properties)
+
+    # Execute transactional SQL on PostgreSQL using standard Java SQL driver via Spark JVM
+    print("Opening database connection to execute atomic upsert transaction...")
+    jvm = spark._jvm
+    jvm.Class.forName("org.postgresql.Driver")
+    conn = jvm.java.sql.DriverManager.getConnection(jdbc_url, rds_username, rds_password)
+    conn.setAutoCommit(False)
+
+    try:
+        stmt = conn.createStatement()
+
+        # Step A: Ensure target schemas exist
+        ensure_target_tables_exist(stmt)
+
+        # Step B: Perform date-bounded idempotent deletes and inserts
+        print(f"Executing daily ridership deletes/inserts for dates {start_date} to {end_date}...")
+        stmt.execute(f"""
+            DELETE FROM gold_daily_ridership 
+            WHERE trip_date BETWEEN '{start_date}'::DATE AND '{end_date}'::DATE
+        """)
+        stmt.execute("""
+            INSERT INTO gold_daily_ridership (
+                trip_date, route_id, vehicle_type, total_trips, unique_vehicles, 
+                avg_capacity, avg_duration_minutes, max_duration_minutes, 
+                trips_completed, trips_in_progress, peak_hour
+            )
+            SELECT 
+                cast(trip_date as DATE), route_id, vehicle_type, total_trips, unique_vehicles, 
+                avg_capacity, avg_duration_minutes, max_duration_minutes, 
+                trips_completed, trips_in_progress, peak_hour
+            FROM stage_gold_daily_ridership
+        """)
+
+        print(f"Executing weekly top routes deletes/inserts for dates {calc_start} to {calc_end}...")
+        stmt.execute(f"""
+            DELETE FROM gold_top_routes_weekly 
+            WHERE calculation_date BETWEEN '{calc_start}'::DATE AND '{calc_end}'::DATE
+        """)
+        stmt.execute("""
+            INSERT INTO gold_top_routes_weekly (
+                calculation_date, route_rank, route_id, total_trips, 
+                total_completed_trips, avg_trip_duration_minutes
+            )
+            SELECT 
+                cast(calculation_date as DATE), route_rank, route_id, total_trips, 
+                total_completed_trips, avg_trip_duration_minutes
+            FROM stage_gold_top_routes_weekly
+        """)
+
+        print(f"Executing trip outliers deletes/inserts for dates {start_date} to {end_date}...")
+        stmt.execute(f"""
+            DELETE FROM gold_trip_outliers 
+            WHERE start_time BETWEEN '{start_date} 00:00:00'::TIMESTAMP AND '{end_date} 23:59:59'::TIMESTAMP
+        """)
+        stmt.execute("""
+            INSERT INTO gold_trip_outliers (
+                trip_id, route_id, vehicle_id, start_time, end_time, 
+                duration_minutes, avg_duration_minutes, stddev_duration_minutes, 
+                z_score, outlier_reason
+            )
+            SELECT 
+                trip_id, route_id, vehicle_id, cast(start_time as TIMESTAMP), cast(end_time as TIMESTAMP), 
+                duration_minutes, avg_duration_minutes, stddev_duration_minutes, 
+                z_score, outlier_reason
+            FROM stage_gold_trip_outliers
+        """)
+
+        # Step C: Clean up temporary staging tables
+        print("Dropping temporary staging tables...")
+        stmt.execute("DROP TABLE IF EXISTS stage_gold_daily_ridership")
+        stmt.execute("DROP TABLE IF EXISTS stage_gold_top_routes_weekly")
+        stmt.execute("DROP TABLE IF EXISTS stage_gold_trip_outliers")
+
+        # Step D: Commit the transaction
+        conn.commit()
+        print("RDS PostgreSQL database transaction successfully committed.")
+
+    except Exception as transaction_err:
+        print(f"CRITICAL ERROR: Transaction failed, rolling back all database writes. Details: {str(transaction_err)}")
+        conn.rollback()
+        raise transaction_err
+    finally:
+        stmt.close()
+        conn.close()
     
     # 6. Commit WAP Batch (Fast-Forward Iceberg branches to main)
     # We only run fast-forward if we are processing a temporary WAP staging branch
@@ -174,8 +276,60 @@ def main():
 
     # Unpersist the cached DataFrame
     enriched_active_df.unpersist()
+    print ("Gold aggregation job completed successfully.")
 
     job.commit()
+
+
+def ensure_target_tables_exist(stmt):
+    """
+    Ensures the three Gold tables exist in PostgreSQL with correct primary keys and column types.
+    """
+    print("Ensuring target table schemas exist in PostgreSQL database...")
+
+    stmt.execute("""
+        CREATE TABLE IF NOT EXISTS gold_daily_ridership (
+            trip_date DATE,
+            route_id VARCHAR(50),
+            vehicle_type VARCHAR(50),
+            total_trips INT,
+            unique_vehicles INT,
+            avg_capacity DOUBLE PRECISION,
+            avg_duration_minutes DOUBLE PRECISION,
+            max_duration_minutes DOUBLE PRECISION,
+            trips_completed INT,
+            trips_in_progress INT,
+            peak_hour INT,
+            PRIMARY KEY (trip_date, route_id, vehicle_type)
+        )
+    """)
+
+    stmt.execute("""
+        CREATE TABLE IF NOT EXISTS gold_top_routes_weekly (
+            calculation_date DATE,
+            route_rank INT,
+            route_id VARCHAR(50),
+            total_trips INT,
+            total_completed_trips INT,
+            avg_trip_duration_minutes DOUBLE PRECISION,
+            PRIMARY KEY (calculation_date, route_id)
+        )
+    """)
+
+    stmt.execute("""
+        CREATE TABLE IF NOT EXISTS gold_trip_outliers (
+            trip_id VARCHAR(100) PRIMARY KEY,
+            route_id VARCHAR(50),
+            vehicle_id VARCHAR(50),
+            start_time TIMESTAMP,
+            end_time TIMESTAMP,
+            duration_minutes DOUBLE PRECISION,
+            avg_duration_minutes DOUBLE PRECISION,
+            stddev_duration_minutes DOUBLE PRECISION,
+            z_score DOUBLE PRECISION,
+            outlier_reason VARCHAR(255)
+        )
+    """)
 
 
 def compute_daily_ridership(spark, start_date, end_date):
