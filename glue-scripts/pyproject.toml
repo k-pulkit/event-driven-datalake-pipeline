@@ -1,0 +1,39 @@
+[project]
+name = "transit-pipeline-scripts"
+version = "0.1.0"
+description = "Development environment for AWS Glue PySpark ETL scripts"
+authors = [
+    { name = "Pulkit Kapoor" }
+]
+# PySpark 3.3.0 (AWS Glue 4.0) is not compatible with Python 3.11+
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "pyspark==3.3.0",  # Matches Glue 4.0 Spark runtime
+    "boto3>=1.26.0"
+]
+
+[tool.poetry]
+# Poetry 2.0 metadata settings
+package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.2.0"
+black = "^23.1.0"
+ruff = "^0.0.260"
+pandas = "^2.1.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "W", "I"]
