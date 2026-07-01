@@ -87,3 +87,13 @@ output "rds_secret_name" {
   description = "The friendly name of the Secrets Manager secret storing RDS credentials"
   value       = aws_secretsmanager_secret.db_secret.name
 }
+
+output "queue_name" {
+  description = "The name of the main SQS ingest queue"
+  value       = module.raw_ingest_sqs_queue.queue_name
+}
+
+output "dlq_name" {
+  description = "The name of the SQS Dead Letter Queue (DLQ)"
+  value       = module.raw_ingest_sqs_queue.dead_letter_queue_name
+}

@@ -13,3 +13,8 @@ output "raw_crawler_arn" {
   description = "The ARN of the raw Glue crawler"
   value       = aws_glue_crawler.raw_crawler.arn
 }
+
+output "sns_topic_arn" {
+  description = "The ARN of the SNS alerting topic"
+  value       = aws_sns_topic.pipeline_alerts.arn
+}
