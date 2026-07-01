@@ -7,6 +7,7 @@
             "Type": "Pass",
             "Comment": "Initialize state variables with default values",
             "Assign": {
+                "execution_branch_name": "{% $replace('wap_' & $states.context.Execution.Name, \"-\", \"_\") %}",
                 "sqs_messages": "{% [] %}",
                 "active_runs": "{% [] %}",
                 "poll_count": "{% 0 %}",
@@ -51,7 +52,10 @@
                     "Next": "ConstructAlertMessage"
                 }
             ],
-            "Next": "DetermineConcurrency"
+            "Next": "DetermineConcurrency",
+            "Output": {
+                "active_run_cnt": "{% $count($active_runs) > 1 %}"
+            }
         },
         "DetermineConcurrency": {
             "Type": "Choice",
@@ -79,7 +83,7 @@
                 "VisibilityTimeout": 1800
             },
             "Assign": {
-                "new_messages": "{% $states.result.Messages %}"
+                "new_messages": "{% ($x := $states.result.Messages.Body ~> $map(function($v) {$parse($v).Records}) ~> $reduce($append); $exists($x) ? $x: []) %}"
             },
             "Retry": [
                 {
@@ -104,16 +108,22 @@
                     "Next": "ConstructAlertMessage"
                 }
             ],
-            "Next": "AccumulateMessages"
+            "Next": "AccumulateMessages",
+            "Output": {
+                "polled_cnt": "{% $count($new_messages) %}"
+            }
         },
         "AccumulateMessages": {
             "Type": "Pass",
             "Comment": "Merge newly polled messages with accumulator and increment poll counter",
             "Assign": {
-                "sqs_messages": "{% [$sqs_messages, $new_messages] %}",
+                "sqs_messages": "{% $append($sqs_messages, $new_messages) %}",
                 "poll_count": "{% $poll_count + 1 %}"
             },
-            "Next": "CheckLoopCondition"
+            "Next": "CheckLoopCondition",
+            "Output": {
+                "sqs_msg_cnt": "{% $sqs_messages %}"
+            }
         },
         "CheckLoopCondition": {
             "Type": "Choice",
@@ -121,10 +131,16 @@
             "Choices": [
                 {
                     "Condition": "{% $count($new_messages) = 0 or $poll_count >= 5 %}",
-                    "Next": "CheckMessagesExist"
+                    "Next": "CheckMessagesExist",
+                    "Output": {
+                        "total_polled_cnt": "{% $count($sqs_messages) %}"
+                    }
                 }
             ],
-            "Default": "PollSQS"
+            "Default": "PollSQS",
+            "Output": {
+                "total_polled_cnt": "{% $count($sqs_messages) %}"
+            }
         },
         "CheckMessagesExist": {
             "Type": "Choice",
@@ -150,8 +166,8 @@
                 "JobName": "${glue_silver_job_name}",
                 "Arguments": {
                     "--s3_bucket": "${landing_bucket_id}",
-                    "--s3_file_paths": "{% $string($map($sqs_messages.Body, function($body) {$eval($body).Records.s3.('s3://' & bucket.name & '/' & object.key)} )) %}",
-                    "--iceberg_branch_name": "{% 'wap_' & $states.context.Execution.Name %}"
+                    "--s3_file_paths": "{% ($x := $sqs_messages.s3.('s3://' & bucket.name & '/' & object.key); $type($x) = \"string\" ? [$x] : $x ) ~> $string %}",
+                    "--iceberg_branch_name": "{% $execution_branch_name %}"
                 }
             },
             "Retry": [
@@ -234,7 +250,7 @@
             "Arguments": {
                 "JobName": "${glue_gold_job_name}",
                 "Arguments": {
-                    "--iceberg_branch_name": "{% 'wap_' & $states.context.Execution.Name %}",
+                    "--iceberg_branch_name": "{% $execution_branch_name %}",
                     "--start_date": "{% $run_metadata.start_date %}",
                     "--end_date": "{% $run_metadata.end_date %}"
                 }
