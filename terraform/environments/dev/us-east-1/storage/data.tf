@@ -10,6 +10,19 @@ data "terraform_remote_state" "security" {
     bucket         = "pkca-terraform-dev-us-east-1-state-bucket"
     key            = "terraform/environments/${var.environment}/${var.aws_region}/security/terraform.tfstate"
     region         = var.aws_region
-    dynamodb_table = "pkca-terraform-dev-lock"
+  }
+}
+
+# ==========================================
+# Default Network Lookups for Simplified RDS
+# ==========================================
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
   }
 }

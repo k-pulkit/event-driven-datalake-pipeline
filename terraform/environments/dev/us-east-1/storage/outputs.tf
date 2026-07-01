@@ -43,3 +43,37 @@ output "silver_db_name" {
   description = "The name of the Glue Silver Data Catalog Database"
   value       = aws_glue_catalog_database.silver_db.name
 }
+
+# ==========================================
+# RDS PostgreSQL Outputs
+# ==========================================
+output "rds_endpoint" {
+  description = "The connection endpoint of the RDS PostgreSQL instance"
+  value       = aws_db_instance.postgres.endpoint
+}
+
+output "rds_address" {
+  description = "The connection address (hostname) of the RDS PostgreSQL instance"
+  value       = aws_db_instance.postgres.address
+}
+
+output "rds_port" {
+  description = "The port the RDS PostgreSQL database is listening on"
+  value       = aws_db_instance.postgres.port
+}
+
+output "rds_db_name" {
+  description = "The name of the default database created in RDS"
+  value       = aws_db_instance.postgres.db_name
+}
+
+output "rds_username" {
+  description = "The master username for the RDS PostgreSQL database"
+  value       = aws_db_instance.postgres.username
+}
+
+output "rds_password" {
+  description = "The master database password"
+  value       = random_password.db_password.result
+  sensitive   = true
+}
