@@ -71,8 +71,8 @@ resource "aws_glue_job" "silver_job" {
     "--silver_table_history"    = "silver_trips_history"
     "--quarantine_bucket"       = local.quarantine_bucket_id
     "--processed_bucket"        = local.processed_bucket_id
-    "--s3_file_paths"           = "[\"s3://edai-city-transit-pipeline-dev-us-east-1-landing-zone/incoming/sample_city_transit_trips.csv\"]"
-    "--iceberg_branch_name"     = "test_branch"
+    "--s3_file_paths"           = ""
+    "--iceberg_branch_name"     = ""
 
     # Configure Spark to run Apache Iceberg with Glue Data Catalog
     "--conf" = "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions --conf spark.hadoop.hive.metastore.client.factory.class=com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory --conf spark.sql.catalog.iceberg_glue=org.apache.iceberg.spark.SparkCatalog --conf spark.sql.catalog.iceberg_glue.catalog-impl=org.apache.iceberg.aws.glue.GlueCatalog --conf spark.sql.catalog.iceberg_glue.warehouse=s3://${local.processed_bucket_id}/ --conf spark.sql.catalog.iceberg_glue.io-impl=org.apache.iceberg.aws.s3.S3FileIO --conf spark.sql.catalog.iceberg_glue.glue.skip-name-validation=false"
@@ -117,8 +117,8 @@ resource "aws_glue_job" "gold_job" {
     "--silver_database"         = local.silver_db_name
     "--silver_table_active"     = "silver_trips_active"
     "--silver_table_history"    = "silver_trips_history"
-    "--start_date"              = "2025-01-01"
-    "--end_date"                = "2025-03-31"
+    "--start_date"              = ""
+    "--end_date"                = ""
     "--iceberg_branch_name"     = "test_branch"
     "--rds_secret_name"         = local.rds_secret_name
 
