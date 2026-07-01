@@ -2,6 +2,8 @@
 
 import sys
 import json
+import boto3
+from datetime import timedelta
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
@@ -18,6 +20,7 @@ def main():
         "silver_table_active",
         "silver_table_history",
         "quarantine_bucket",
+        "processed_bucket",
         "s3_file_paths",
         "iceberg_branch_name"
     ]
@@ -36,6 +39,7 @@ def main():
     table_active = args["silver_table_active"]
     table_history = args["silver_table_history"]
     quarantine_bucket = args["quarantine_bucket"]
+    processed_bucket = args["processed_bucket"]
     branch_name = args["iceberg_branch_name"]
 
     # Parse the S3 file paths passed from Step Functions
@@ -136,7 +140,13 @@ def main():
     
     print(f"Ingested metrics collected: {metrics}")
 
+    start_date_str = ""
+    end_date_str = ""
+
     if clean_count > 0 and min_start is not None and max_start is not None:
+        start_date_str = min_start.strftime("%Y-%m-%d")
+        end_date_str = max_start.strftime("%Y-%m-%d")
+
         # Merge (Upsert) clean records into the Active Iceberg branch
         print(f"Merging clean records into Iceberg active table: {target_active_table}")
         
@@ -157,6 +167,24 @@ def main():
         """)
     else:
         print("No clean records to merge. Skipping Iceberg active table upserts.")
+
+    # Unconditionally write run metadata JSON to the Processed/Silver bucket warehouse
+    # This allows Step Functions to query affected date ranges and skip Gold if empty
+    s3_client = boto3.client("s3")
+    metadata_payload = {
+        "sfn_execution_id": branch_name,
+        "start_date": start_date_str,
+        "end_date": end_date_str
+    }
+    print(f"Writing execution metadata to S3 Processed warehouse: {metadata_payload}")
+    try:
+        s3_client.put_object(
+            Bucket=processed_bucket,
+            Key=f"run_metadata/{branch_name}.json",
+            Body=json.dumps(metadata_payload)
+        )
+    except Exception as ex:
+        print(f"WARNING: Failed to write metadata JSON to S3: {str(ex)}")
 
     # Unpersist the clean dataframe
     observed_clean_df.unpersist()
