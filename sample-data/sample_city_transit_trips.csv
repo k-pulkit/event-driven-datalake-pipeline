@@ -1,4 +1,4 @@
-trip_id,vehicle_id,route_id,start_time,end_time,distance_km,status,
+trip_id,vehicle_id,route_id,start_time,end_time,distance_km,status,vehicle_id_raw
 1438575a-57d3-4d39-a8ca-49283a856ab3,v003,R08,2025-01-12T16:26:00,2025-01-12T17:46:00,17.68,completed,V003
 9acc0452-fe5c-4191-a827-1ce7b94ebc77,v015,R06,2025-02-20T15:27:00,2025-02-20T15:42:00,16.61,completed,V015
 3cbdc748-67b2-4bcf-9c65-0ea8a1ebf7f8,v014,R02,2025-01-04T09:37:00,2025-01-04T10:26:00,24.4,completed,V014
