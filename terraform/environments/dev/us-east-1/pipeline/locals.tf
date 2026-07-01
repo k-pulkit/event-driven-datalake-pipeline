@@ -9,14 +9,18 @@ locals {
   }
 
   # Outputs from other states
-  kms_key_id              = data.terraform_remote_state.security.outputs.kms_key_id
-  glue_job_role_arn       = data.terraform_remote_state.security.outputs.glue_job_role_arn
+  kms_key_arn                     = data.terraform_remote_state.security.outputs.kms_key_arn
+  glue_job_role_arn               = data.terraform_remote_state.security.outputs.glue_job_role_arn
   sfn_execution_role_arn          = data.terraform_remote_state.security.outputs.sfn_execution_role_arn
   eventbridge_sfn_target_role_arn = data.terraform_remote_state.security.outputs.eventbridge_sfn_target_role_arn
 
-  sqs_queue_arn     = data.terraform_remote_state.storage.outputs.queue_arn
-  sqs_queue_url     = data.terraform_remote_state.storage.outputs.queue_url
-  landing_bucket_id = data.terraform_remote_state.storage.outputs.raw_bucket_id
+  sqs_queue_arn        = data.terraform_remote_state.storage.outputs.queue_arn
+  sqs_queue_url        = data.terraform_remote_state.storage.outputs.queue_url
+  landing_bucket_id    = data.terraform_remote_state.storage.outputs.raw_bucket_id
+  landing_db_name      = data.terraform_remote_state.storage.outputs.landing_db_name
+  silver_db_name       = data.terraform_remote_state.storage.outputs.silver_db_name
+  quarantine_bucket_id = data.terraform_remote_state.storage.outputs.quarantine_bucket_id
+  processed_bucket_id  = data.terraform_remote_state.storage.outputs.processed_bucket_id
 
   # Glue jobs names (placeholders)
   glue_silver_job_name = "${local.project_prefix}-${var.environment}-silver-processing"

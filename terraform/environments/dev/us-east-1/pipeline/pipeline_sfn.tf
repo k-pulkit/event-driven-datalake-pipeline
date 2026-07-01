@@ -26,8 +26,8 @@ resource "aws_sfn_state_machine" "transit_pipeline_orchestrator" {
 # 2. EVENTBRIDGE SCHEDULER (Cron every 5 mins)
 # ==========================================
 resource "aws_scheduler_schedule" "transit_pipeline_schedule" {
-  name        = "${local.project_prefix}-${var.environment}-schedule"
-  group_name  = "default"
+  name       = "${local.project_prefix}-${var.environment}-schedule"
+  group_name = "default"
 
   flexible_time_window {
     mode = "OFF"
