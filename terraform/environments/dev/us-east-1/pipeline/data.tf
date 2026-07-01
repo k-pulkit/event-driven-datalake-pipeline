@@ -8,7 +8,6 @@ data "terraform_remote_state" "security" {
     bucket         = "pkca-terraform-dev-us-east-1-state-bucket"
     key            = "terraform/environments/${var.environment}/${var.aws_region}/security/terraform.tfstate"
     region         = var.aws_region
-    dynamodb_table = "pkca-terraform-dev-lock"
   }
 }
 
@@ -18,6 +17,5 @@ data "terraform_remote_state" "storage" {
     bucket         = "pkca-terraform-dev-us-east-1-state-bucket"
     key            = "terraform/environments/${var.environment}/${var.aws_region}/storage/terraform.tfstate"
     region         = var.aws_region
-    dynamodb_table = "pkca-terraform-dev-lock"
   }
 }

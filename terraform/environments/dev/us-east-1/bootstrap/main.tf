@@ -47,19 +47,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state_bucket_encr
   }
 }
 
-resource "aws_dynamodb_table" "lock_table" {
-  name = "pkca-terraform-${var.environment}-lock"
+# This is not needed for latest terraform versions, but is kept here for backward compatibility with older versions of terraform.
+# resource "aws_dynamodb_table" "lock_table" {
+#   name = "pkca-terraform-${var.environment}-lock"
 
-  billing_mode = "PAY_PER_REQUEST"
+#   billing_mode = "PAY_PER_REQUEST"
 
-  hash_key = "LockID"
+#   hash_key = "LockID"
 
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
+#   attribute {
+#     name = "LockID"
+#     type = "S"
+#   }
 
-  tags = {
-    Path = "terraform/environments/dev/us-east-1/bootstrap/"
-  }
-}
+#   tags = {
+#     Path = "terraform/environments/dev/us-east-1/bootstrap/"
+#   }
+# }
