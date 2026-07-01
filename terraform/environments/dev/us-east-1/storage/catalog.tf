@@ -4,12 +4,12 @@
 # GLUE DATA CATALOG DATABASES
 # ==========================================
 resource "aws_glue_catalog_database" "landing_db" {
-  name        = "${local.project_prefix}-${var.environment}-landing-db"
+  name        = replace("${local.project_prefix}-${var.environment}-landing-db", "-", "_")
   description = "Glue Catalog database for Raw Landing Zone data"
 }
 
 resource "aws_glue_catalog_database" "silver_db" {
-  name        = "${local.project_prefix}-${var.environment}-silver-db"
+  name        = replace("${local.project_prefix}-${var.environment}-silver-db", "-", "_")
   description = "Glue Catalog database for Standardized Silver Zone"
 }
 
