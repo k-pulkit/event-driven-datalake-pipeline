@@ -14,6 +14,7 @@ resource "aws_sfn_state_machine" "transit_pipeline_orchestrator" {
     environment          = var.environment
     sqs_queue_url        = local.sqs_queue_url
     landing_bucket_id    = local.landing_bucket_id
+    processed_bucket_id  = local.processed_bucket_id
     glue_silver_job_name = local.glue_silver_job_name
     glue_gold_job_name   = local.glue_gold_job_name
     sns_topic_arn        = aws_sns_topic.pipeline_alerts.arn

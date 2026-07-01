@@ -12,7 +12,8 @@
                 "poll_count": "{% 0 %}",
                 "new_messages": "{% [] %}",
                 "error_message": "{% '' %}",
-                "error_source": "{% 'None' %}"
+                "error_source": "{% 'None' %}",
+                "run_metadata": "{% {} %}"
             },
             "Next": "CheckActiveRuns"
         },
@@ -176,7 +177,54 @@
                     "Next": "ConstructAlertMessage"
                 }
             ],
-            "Next": "RunGlueGoldJob"
+            "Next": "ReadRunMetadata"
+        },
+        "ReadRunMetadata": {
+            "Type": "Task",
+            "Comment": "Read Silver run metadata JSON from S3 to retrieve affected date bounds and counts",
+            "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
+            "Arguments": {
+                "Bucket": "${processed_bucket_id}",
+                "Key": "{% 'metadata/run_wap_' & $states.context.Execution.Name & '.json' %}"
+            },
+            "Assign": {
+                "run_metadata": "{% $eval($states.result.Body) %}"
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Comment": "Handle metadata retrieval failure",
+                    "Assign": {
+                        "error_message": "{% 'Failed to read run metadata from S3: ' & $string($states.errorOutput) %}",
+                        "error_source": "ReadRunMetadata"
+                    },
+                    "Next": "ConstructAlertMessage"
+                }
+            ],
+            "Next": "DetermineGoldExecution"
+        },
+        "DetermineGoldExecution": {
+            "Type": "Choice",
+            "Comment": "Only run Gold job if there were clean records processed by the Silver job",
+            "Choices": [
+                {
+                    "Condition": "{% $run_metadata.clean_count > 0 %}",
+                    "Next": "RunGlueGoldJob"
+                }
+            ],
+            "Default": "DeleteSQSMessages"
         },
         "RunGlueGoldJob": {
             "Type": "Task",
@@ -186,7 +234,9 @@
             "Arguments": {
                 "JobName": "${glue_gold_job_name}",
                 "Arguments": {
-                    "--iceberg_branch_name": "{% 'wap_' & $states.context.Execution.Name %}"
+                    "--iceberg_branch_name": "{% 'wap_' & $states.context.Execution.Name %}",
+                    "--start_date": "{% $run_metadata.start_date %}",
+                    "--end_date": "{% $run_metadata.end_date %}"
                 }
             },
             "Retry": [

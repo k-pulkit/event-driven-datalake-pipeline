@@ -91,6 +91,17 @@ resource "aws_iam_role_policy" "sfn_execution_policy" {
           "arn:aws:sns:${var.aws_region}:${local.account_id}:${local.project_prefix}-${var.environment}-alerts"
         ]
       },
+      # S3 Read Access for Run Metadata
+      {
+        Sid    = "S3MetadataRead"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = [
+          "arn:aws:s3:::${local.project_prefix}-${var.environment}-*-processed-zone/metadata/*"
+        ]
+      },
       # CloudWatch Logging / Log Delivery
       {
         Sid    = "CloudWatchLogsDelivery"
