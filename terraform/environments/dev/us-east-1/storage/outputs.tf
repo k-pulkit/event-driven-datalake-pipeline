@@ -77,3 +77,13 @@ output "rds_password" {
   value       = random_password.db_password.result
   sensitive   = true
 }
+
+output "rds_security_group_id" {
+  description = "The ID of the RDS security group"
+  value       = aws_security_group.rds_sg.id
+}
+
+output "rds_secret_name" {
+  description = "The friendly name of the Secrets Manager secret storing RDS credentials"
+  value       = aws_secretsmanager_secret.db_secret.name
+}

@@ -73,3 +73,25 @@ resource "aws_db_instance" "postgres" {
 
   tags = local.tags
 }
+
+# ==========================================
+# 5. SECRETS MANAGER FOR DATABASE CREDENTIALS
+# ==========================================
+resource "aws_secretsmanager_secret" "db_secret" {
+  name                    = "${var.namespace}-analytics-${var.environment}-rds-secret"
+  description             = "Database credentials for shared analytics RDS PostgreSQL"
+  kms_key_id              = local.kms_master_key_arn
+  recovery_window_in_days = 0 # Force delete immediately on destroy
+  tags                    = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "db_secret_val" {
+  secret_id = aws_secretsmanager_secret.db_secret.id
+  secret_string = jsonencode({
+    host     = aws_db_instance.postgres.address
+    port     = aws_db_instance.postgres.port
+    db_name  = aws_db_instance.postgres.db_name
+    username = aws_db_instance.postgres.username
+    password = random_password.db_password.result
+  })
+}
