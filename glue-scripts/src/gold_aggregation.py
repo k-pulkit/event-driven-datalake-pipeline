@@ -62,10 +62,11 @@ def main():
         return
 
     # Load the specific WAP branch for validation/aggregation
+    spark.sparkContext.setJobGroup("load_and_filter", "Load Active trips from Iceberg branch, apply date filtering and vehicle joins")
     active_trips_df = spark.read \
         .format("iceberg") \
         .option("branch", branch_name) \
-        .load(f"{catalog}.{silver_db}.{table_active}")
+        .load(f"{catalog}.`{silver_db}`.{table_active}")
 
     # Load static dimensions as Spark DataFrames to register in the Spark session catalog
     dim_vehicles_dyf = glueContext.create_dynamic_frame.from_catalog(
@@ -107,8 +108,13 @@ def main():
     enriched_active_df.createOrReplaceTempView("active_trips")
 
     # 4. Compute partition-pruned aggregates
+    spark.sparkContext.setJobGroup("compute_daily_ridership", "Compute Daily Ridership Aggregates")
     daily_ridership_df = compute_daily_ridership(spark, start_date, end_date)
+
+    spark.sparkContext.setJobGroup("compute_weekly_top_routes", "Compute Weekly Top Routes Aggregates")
     weekly_top_routes_df = compute_weekly_top_routes(spark, calc_start, calc_end)
+
+    spark.sparkContext.setJobGroup("compute_outliers", "Compute Outliers Aggregates")
     outliers_df = compute_outliers(spark, start_date, end_date, branch_name)
 
     # 5. Load aggregates to RDS PostgreSQL (Staging-to-Target Upsert Pattern)
@@ -151,13 +157,14 @@ def main():
     # 6. Commit WAP Batch (Fast-Forward Iceberg branches to main)
     # We only run fast-forward if we are processing a temporary WAP staging branch
     if branch_name != "main":
+        spark.sparkContext.setJobGroup("commit_wap_branches", f"Fast-Forward Iceberg staging branch '{branch_name}' to main")
         print(f"RDS database transaction successfully completed. Committing Iceberg S3 state from branch '{branch_name}'...")
         try:
             # Fast-forward active and history status tables
-            spark.sql(f"CALL {catalog}.system.fast_forward('{silver_db}.{table_active}', 'main', '{branch_name}')")
+            spark.sql(f"CALL {catalog}.system.fast_forward('`{silver_db}`.{table_active}', 'main', '{branch_name}')")
             print("Active status Iceberg table successfully fast-forwarded to main.")
 
-            spark.sql(f"CALL {catalog}.system.fast_forward('{silver_db}.{table_history}', 'main', '{branch_name}')")
+            spark.sql(f"CALL {catalog}.system.fast_forward('`{silver_db}`.{table_history}', 'main', '{branch_name}')")
             print("Append-only history Iceberg table successfully fast-forwarded to main.")
         except Exception as e:
             print(f"Error executing Iceberg WAP fast-forward: {str(e)}")
