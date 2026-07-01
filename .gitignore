@@ -2,6 +2,7 @@
 
 # macOS system files
 .DS_Store
+**/*.pem
 
 # local metastore
 metastore_db/
