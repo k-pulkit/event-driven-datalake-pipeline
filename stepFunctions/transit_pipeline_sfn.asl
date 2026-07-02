@@ -204,7 +204,7 @@
                 "Key": "{% 'run_metadata/' & $execution_branch_name & '.json' %}"
             },
             "Assign": {
-                "run_metadata": "{% $eval($states.result.Body) %}"
+                "run_metadata": "{% $parse($states.result.Body) %}"
             },
             "Retry": [
                 {
