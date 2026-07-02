@@ -38,6 +38,14 @@ flowchart TD
 
 ---
 
+## 📸 Pipeline Execution Screenshot
+
+Below is the verified end-to-end execution of the Step Functions orchestrator workflow, showing successful database validation, WAP branching, and RDS load phases:
+
+![Step Functions Pipeline Execution](docs/images/step_functions_execution.png)
+
+---
+
 ## 📊 Data Layer & Zones
 
 1.  **Landing Zone (`raw`):** Stores raw incoming CSV records inside `/incoming/`. Triggers object-creation events to notify the queue.
