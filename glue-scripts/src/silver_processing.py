@@ -330,7 +330,7 @@ def standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name):
     # Rejects start_time older than 30 days or in the future (+1 day buffer for clock and timezone skew)
     # Cannot use current_timestamp() in filter expressions due to Spark's Catalyst optimization rules
     # , so we compute the bounds in Python and pass them as literals
-    lower_time_bound = date_sub(lit(now).cast("timestamp"), 3000)
+    lower_time_bound = date_sub(lit(now).cast("timestamp"), 30)
     upper_time_bound = date_add(lit(now).cast("timestamp"), 1)
     
     valid_time_df = has_keys_df.filter(
