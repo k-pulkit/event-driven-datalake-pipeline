@@ -8,7 +8,8 @@ from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from pyspark.sql.functions import col, lit, trim, upper, lower, to_timestamp, broadcast, current_timestamp, input_file_name, count, min, max, date_sub, date_add, when, concat, lpad, substring, date_format
+from pyspark.sql.functions import col, lit, trim, upper, lower, to_timestamp, broadcast, current_timestamp, input_file_name, count, min, max, date_sub, date_add, when, concat, lpad, substring, date_format, row_number
+from pyspark.sql.window import Window
 from pyspark.sql import Observation
 
 def main():
@@ -43,7 +44,7 @@ def main():
     branch_name = args["iceberg_branch_name"]
 
     # Parse the S3 file paths passed from Step Functions
-    s3_paths = json.loads(args["s3_file_paths"])
+    s3_paths = list(set(json.loads(args["s3_file_paths"])))
     print(f"Ingesting {len(s3_paths)} files: {s3_paths}")
     print(f"Targeting WAP branch: {branch_name}")
 
@@ -90,6 +91,9 @@ def main():
     # Execute modular pure transformations (Unit Testable)
     clean_df, bad_df = standardize_and_validate(raw_df, dim_routes, dim_vehicles, branch_name)
 
+    # Deduplicate the overall clean incoming micro-batch to prevent exact duplicates in history
+    clean_df = clean_df.dropDuplicates(["trip_id", "route_id", "vehicle_id", "start_time", "end_time"])
+
     # Union bad records and add audit timestamp
     quarantine_df = bad_df.withColumn("quarantined_at", current_timestamp())
 
@@ -113,8 +117,19 @@ def main():
     )
     # Cache the clean dataframe as it will be written to history and active tables
     observed_df.cache()
-    # Register the separate views
-    observed_df.createOrReplaceTempView("new_trips_view")
+    
+    # Deduplicate the active source data by trip_id to prevent merge cardinality violations
+    # Rule: completed status first, then largest end_time desc
+    dedup_window = Window.partitionBy("trip_id").orderBy(
+        when(col("status") == "completed", 1).otherwise(2).asc(),
+        col("end_time").desc_nulls_last()
+    )
+    merge_source_df = observed_df.withColumn("rn", row_number().over(dedup_window)) \
+        .filter(col("rn") == 1) \
+        .drop("rn")
+
+    # Register the deduplicated dataframe as the merge source view
+    merge_source_df.createOrReplaceTempView("new_trips_view")
     spark.catalog.cacheTable("new_trips_view")
 
     # Define Iceberg table names for history and active branches
