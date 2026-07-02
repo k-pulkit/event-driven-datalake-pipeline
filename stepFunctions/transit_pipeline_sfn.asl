@@ -9,6 +9,7 @@
             "Assign": {
                 "execution_branch_name": "{% $replace('wap_' & $states.context.Execution.Name, \"-\", \"_\") %}",
                 "sqs_messages": "{% [] %}",
+                "receipt_handles": "{% [] %}",
                 "active_runs": "{% [] %}",
                 "poll_count": "{% 0 %}",
                 "new_messages": "{% [] %}",
@@ -83,7 +84,8 @@
                 "VisibilityTimeout": 1800
             },
             "Assign": {
-                "new_messages": "{% ($x := $states.result.Messages.Body ~> $map(function($v) {$parse($v).Records}) ~> $reduce($append); $exists($x) ? $x: []) %}"
+                "new_messages": "{% ($x := $states.result.Messages.Body ~> $map(function($v) {$parse($v).Records}) ~> $reduce($append); $exists($x) ? $x: []) %}",
+                "receipt_handles": "{% $append($receipt_handles, $states.result.Messages.ReceiptHandle) %}"
             },
             "Retry": [
                 {
@@ -122,7 +124,7 @@
             },
             "Next": "CheckLoopCondition",
             "Output": {
-                "sqs_msg_cnt": "{% $sqs_messages %}"
+                "sqs_msg_cnt": "{% $count($sqs_messages) %}"
             }
         },
         "CheckLoopCondition": {
@@ -236,7 +238,7 @@
             "Comment": "Only run Gold job if there were clean records processed by the Silver job",
             "Choices": [
                 {
-                    "Condition": "{% $run_metadata.clean_count > 0 %}",
+                    "Condition": "{% $exists($run_metadata.start_date) and $trim($run_metadata.start_date) != \"\" and $exists($run_metadata.end_date) and $exists($run_metadata.end_date) %}",
                     "Next": "RunGlueGoldJob"
                 }
             ],
@@ -283,7 +285,7 @@
         "DeleteSQSMessages": {
             "Type": "Map",
             "Comment": "Delete successfully processed message batch from SQS",
-            "Items": "{% $sqs_messages %}",
+            "Items": "{% $receipt_handles %}",
             "MaxConcurrency": 10,
             "ItemProcessor": {
                 "ProcessorConfig": {
@@ -297,7 +299,7 @@
                         "Resource": "arn:aws:states:::aws-sdk:sqs:deleteMessage",
                         "Arguments": {
                             "QueueUrl": "${sqs_queue_url}",
-                            "ReceiptHandle": "{% $states.input.ReceiptHandle %}"
+                            "ReceiptHandle": "{% $states.input %}"
                         },
                         "Retry": [
                             {
