@@ -43,6 +43,9 @@ terraform.rc
 
 # Local-only context files
 docs/**/*md
+docs/**/*pptx
+docs/**/*key
+!docs/VERIFICATION.md
 AGENT.md
 
 # Vscode
