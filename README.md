@@ -8,6 +8,14 @@ A production-grade, highly secure, cost-optimized, and transactional serverless 
 
 The pipeline is built on a **layered, decoupled AWS architecture** utilizing S3 datalake zones, SQS buffering, Step Functions orchestration, Glue PySpark (for Silver Iceberg storage), and transactional PostgreSQL loading (for Gold database views).
 
+
+### Architecture diagram
+
+![Architecture](docs/images/architecture.png)
+
+
+### Data Flow Diagram
+
 ```mermaid
 flowchart TD
     subgraph Ingestion
