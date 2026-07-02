@@ -1,0 +1,72 @@
+# or ABOUTME: CI/CD workflow to manually trigger and deploy layered regional Terraform configurations to Dev environment from development branch
+# sample CICD workflow to deploy layered Terraform configurations to Dev environment from development branch
+# NOT TESTED YET, but should work with the following assumptions:
+# 1. The AWS OIDC role is already created and configured with the correct trust relationship
+# 2. The AWS OIDC role has the necessary permissions to assume the deployment role
+# 3. The AWS deployment role is already created and configured with the correct permissions to deploy the Terraform resources
+
+name: Deploy IaC to Dev
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Terraform Layers
+    runs-on: ubuntu-latest
+
+    # Inject Terraform variables as OS environment variables for all steps
+    # This allows terraform provider to assume the deployment role using the OIDC token and the provided role ARN
+    env:
+      TF_VAR_is_github_actions: true
+      TF_VAR_terraform_deployment_role_arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+
+    steps:
+      # Step 1: Checkout the code from development branch
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: development
+
+      # Step 2: Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      # Step 3: Authenticate with AWS via OIDC using Role 1 (OIDC assume role)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      # Step 4: Deploy layered Terraform folders in strict dependency sequence
+      - name: Deploy Security Layer
+        run: |
+          cd terraform/environments/dev/us-east-1/security
+          terraform init -backend-config="../../backend-shared.tfvars" -backend-config="key=terraform/environments/dev/us-east-1/security/terraform.tfstate"
+          terraform apply -auto-approve
+
+      - name: Deploy Storage Layer
+        run: |
+          cd terraform/environments/dev/us-east-1/storage
+          terraform init -backend-config="../../backend-shared.tfvars" -backend-config="key=terraform/environments/dev/us-east-1/storage/terraform.tfstate"
+          terraform apply -auto-approve
+
+      - name: Deploy Pipeline Layer
+        run: |
+          cd terraform/environments/dev/us-east-1/pipeline
+          terraform init -backend-config="../../backend-shared.tfvars" -backend-config="key=terraform/environments/dev/us-east-1/pipeline/terraform.tfstate"
+          terraform apply -auto-approve
+
+      - name: Deploy Monitoring Layer
+        run: |
+          cd terraform/environments/dev/us-east-1/monitoring
+          terraform init -backend-config="../../backend-shared.tfvars" -backend-config="key=terraform/environments/dev/us-east-1/monitoring/terraform.tfstate"
+          terraform apply -auto-approve
