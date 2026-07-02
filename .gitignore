@@ -42,7 +42,7 @@ terraform.rc
 !*defaults.tfvars
 
 # Local-only context files
-docs/
+docs/**/*md
 AGENT.md
 
 # Vscode
