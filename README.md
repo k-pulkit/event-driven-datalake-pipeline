@@ -1,4 +1,4 @@
-# City Transit Data Pipeline
+# Event Driven Data Pipeline
 
 A production-grade, highly secure, cost-optimized, and transactional serverless data pipeline designed to ingest, clean, and aggregate city transit ridership records.
 

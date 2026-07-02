@@ -96,10 +96,12 @@ resource "aws_iam_role_policy" "sfn_execution_policy" {
         Sid    = "S3MetadataRead"
         Effect = "Allow"
         Action = [
-          "s3:GetObject"
+          "s3:GetObject",
+          "s3:ListBucket"
         ]
         Resource = [
-          "arn:aws:s3:::${local.project_prefix}-${var.environment}-*-processed-zone/metadata/*"
+          "arn:aws:s3:::${local.project_prefix}-${var.environment}-*-silver-zone",
+          "arn:aws:s3:::${local.project_prefix}-${var.environment}-*-silver-zone/*"
         ]
       },
       # CloudWatch Logging / Log Delivery

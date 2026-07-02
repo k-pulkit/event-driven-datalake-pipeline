@@ -201,7 +201,7 @@
             "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
             "Arguments": {
                 "Bucket": "${processed_bucket_id}",
-                "Key": "{% 'metadata/run_wap_' & $states.context.Execution.Name & '.json' %}"
+                "Key": "{% 'run_metadata/' & $execution_branch_name & '.json' %}"
             },
             "Assign": {
                 "run_metadata": "{% $eval($states.result.Body) %}"
