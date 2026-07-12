@@ -13,7 +13,7 @@ module "s3_access_logs" {
   control_object_ownership = true
   object_ownership         = "ObjectWriter"
 
-  # Grants permissions for S3 log delivery                                                                                                    
+  # Grants permissions for S3 log delivery
   grant = [
     {
       type       = "Group"
@@ -31,6 +31,21 @@ module "s3_access_logs" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  # Access logs are audit trail, not queried routinely - archive to Glacier after 30 days
+  lifecycle_rule = [
+    {
+      id      = "archive-access-logs-to-glacier"
+      enabled = true
+      filter  = { prefix = "" }
+      transition = [
+        {
+          days          = 30
+          storage_class = "GLACIER"
+        }
+      ]
+    }
+  ]
 
   tags = local.tags
 }
@@ -68,6 +83,22 @@ module "s3_datalake_buckets" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  # Quarantine is transient audit storage, not part of active querying - archive to
+  # Glacier after 30 days. Landing/silver/gold/queries stay in Standard for live Glue/Athena reads.
+  lifecycle_rule = each.key == "quarantine" ? [
+    {
+      id      = "archive-quarantine-to-glacier"
+      enabled = true
+      filter  = { prefix = "" }
+      transition = [
+        {
+          days          = 30
+          storage_class = "GLACIER"
+        }
+      ]
+    }
+  ] : []
 
   tags = local.tags
 
